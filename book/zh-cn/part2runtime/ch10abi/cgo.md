@@ -1,9 +1,9 @@
 ---
-weight: 2503
-title: "10.3 cgo"
+weight: 2504
+title: "10.4 cgo"
 ---
 
-# 10.3 cgo
+# 10.4 cgo
 
 [TOC]
 
@@ -437,7 +437,7 @@ func cgocallbackg1(ctxt uintptr) {
 }
 ```
 
-## 总结
+## 小结
 
 TODO:
 

@@ -1,15 +1,15 @@
 ---
 weight: 2500
-title: "第十章 兼容与契约"
+title: "第 10 章 兼容与契约"
 ---
 
-# 第十章 兼容与契约
+# 第 10 章 兼容与契约
 
-- [10.1 运行时的系统调用: Linux](./syscall-linux.md)
-- [10.2 参与运行时的系统调用: Darwin）](./syscall-darwin.md)
-- [10.3 cgo](./cgo.md)
-- [10.4 WebAssembly](./wasm.md)
-- [10.5 用户态系统调用](./syscall-pkg.md)
+- [10.1 运行时系统调用](./syscallrt.md)
+- [10.2 用户态系统调用](./syscallpkg.md)
+- [10.3 调用规范](./callconv.md)
+- [10.4 Cgo](./cgo.md)
+- [10.5 WebAssembly](./wasm.md)
 
 ## 许可
 

@@ -1,9 +1,9 @@
 ---
-weight: 2504
-title: "10.4 WebAssembly"
+weight: 2505
+title: "10.5 WebAssembly"
 ---
 
-# 10.4 WebAssembly
+# 10.5 WebAssembly
 
 [TOC]
 
