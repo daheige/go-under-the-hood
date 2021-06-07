@@ -1,11 +1,9 @@
 ---
 weight: 2310
-title: "8.10 用户层 APIs"
+title: "8.10 终结器"
 ---
 
-# 8.10 用户层 APIs
-
-[TOC]
+# 8.10 终结器
 
 TODO:
 
@@ -24,12 +22,12 @@ func efaceOf(ep *interface{}) *eface {
 }
 
 func SetFinalizer(obj interface{}, finalizer interface{}) {
-	(...)
+	...
 	e := efaceOf(&obj)
 	etyp := e._type
-	(...)
+	...
 	ot := (*ptrtype)(unsafe.Pointer(etyp))
-	(...)
+	...
 
 	// find the containing object
 	base, _, _ := findObject(uintptr(e.data), 0, 0)
@@ -191,7 +189,7 @@ func runfinq() {
 			continue
 		}
 		unlock(&finlock)
-		(...)
+		...
 		for fb != nil {
 			for i := fb.cnt; i > 0; i-- {
 				f := &fb.fin[i-1]
@@ -336,4 +334,4 @@ func KeepAlive(x interface{}) {
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

@@ -1,11 +1,11 @@
 ---
-weight: 5004
-title: "附录B：术语表"
+weight: 5001
+title: "附录 A：术语表"
 ---
 
-# 附录B：术语表
+# 术语表
 
-本文整理了书中出现的术语表，已英文字典序排列。
+本文整理了书中出现的术语表，已英文字典序排列（注：尚未补完）。
 
 | 术语       | 首次出现的章节 | English               | 缩写      | 备注 |
 | ---------- | -------------- | --------------------- | --------- | ---- |
@@ -35,6 +35,7 @@ title: "附录B：术语表"
 | 栈         |                | Stack                 |           |      |
 | 微型分配器 |                | Tiny Allocator        |           |      |
 | 微对象     |                | Tiny Object           |           |      |
+| 内存屏障   |                | Memory Barrier        |           |      |
 | 写屏障     |                | Write Barrier         | WB/wb     |      |
 | 工作线程   |                | Worker Thread         |           |      |
 |            |                |                       |           |      |
@@ -55,9 +56,11 @@ title: "附录B：术语表"
 |            |                |                       |           |      |
 | 真共享     |                | True Sharing          |           |      |
 | 假共享     |                | False Sharing         |           |      |
-|            |                |                       |           |      |
-|            |                |                       |           |      |
-|            |                |                       |           |      |
-|            |                |                       |           |      |
+| 无锁       |                | Lock-free             | LF        |      |
+| 无等待     |                | Wait-free             |           |      |
+| 开放编码式  |                | Open-coded            |           |      |
+| 函数序言    |                |  Prologue            |            |      |
+| 函数尾声    |                |  Epilogue            |            |      |
+| 延迟比特    |                |  Defer Bit            |            |      |
 
 

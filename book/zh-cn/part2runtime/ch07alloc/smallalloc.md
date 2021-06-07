@@ -5,8 +5,6 @@ title: "7.5 小对象分配"
 
 # 7.5 小对象分配
 
-[TOC]
-
 小对象分配过程相对就比较复杂了。
 
 ## 从 mcache 获取
@@ -191,4 +189,4 @@ func (c *mcentral) grow() *mspan {
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

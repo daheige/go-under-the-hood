@@ -1,6 +1,6 @@
-baseURL = "http://changkun.de/golang"
+baseURL = "http://golang.design/under-the-hood"
 languageCode = "zh-cn"
-title = "Go Under The Hood"
+title = "Go 语言原本"
 theme = "book"
 
 [markup.highlight]
@@ -8,7 +8,7 @@ theme = "book"
     guessSyntax = false
     hl_Lines = ""
     lineNoStart = 1
-    lineNos = false
+    lineNos = true
     lineNumbersInTable = true
     noClasses = true
     style = "vs"

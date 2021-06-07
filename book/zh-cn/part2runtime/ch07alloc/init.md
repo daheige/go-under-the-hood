@@ -5,8 +5,6 @@ title: "7.3 初始化"
 
 # 7.3 初始化
 
-[TOC]
-
 除去执行栈外，内存分配器是最先完成初始化的，我们先来看这个初始化的过程。
 内存分配器的初始化除去一些例行的检查之外，就是对堆的初始化了：
 
@@ -75,4 +73,4 @@ func (h *mheap) init() {
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

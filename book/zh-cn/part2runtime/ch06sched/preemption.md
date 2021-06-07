@@ -1,22 +1,21 @@
 ---
-weight: 2107
-title: "6.7 协作与抢占"
+weight: 2108
+title: "6.8 协作与抢占"
 ---
 
-# 6.7 协作与抢占
+# 6.8 协作与抢占
 
-[TOC]
-
-我们在[分析调度循环](./exec.md)的时候总结过一个问题：
+我们在 [6.3 调度循环](./exec.md) 一节中遗留过一个未解答的问题：
 如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？
 这便涉及到有关调度的两个理念：协作式调度与抢占式调度。
 
 协作式和抢占式这两个理念解释起来很简单：
 协作式调度依靠被调度方主动弃权；抢占式调度则依靠调度器强制将被调度方被动中断。
 这两个概念其实描述了调度的两种截然不同的策略，这两种决策模式，在调度理论中其实已经研究得很透彻了。
-Go 的运行时并不具备操作系统内核级的中断能力，基于工作窃取的调度器实现，本质上属于先来先服务的协作式调度，
-为了解决响应时间可能较高的问题，目前运行时实现了两种不同的调度策略、每种策略哥两个形式来保证，
-在大部分情况下，不同的 G 能够获得均匀的时间片：
+
+Go 的运行时并不具备操作系统内核级的硬件中断能力，基于工作窃取的调度器实现，本质上属于
+先来先服务的协作式调度，为了解决响应时间可能较高的问题，目前运行时实现了两种不同的调度策略、
+每种策略各两个形式。保证在大部分情况下，不同的 G 能够获得均匀的时间片：
 
 - 同步协作式调度
   1. 主动用户让权：通过 `runtime.Gosched` 调用主动让出执行机会；
@@ -25,13 +24,10 @@ Go 的运行时并不具备操作系统内核级的中断能力，基于工作�
   1. 被动监控抢占：当 G 阻塞在 M 上时（系统调用、channel 等），系统监控会将 P 
      从 M 上抢夺并分配给其他的 M 来执行其他的 G，而位于被抢夺 P 的 M 本地调度队列中
      的 G 则可能会被偷取到其他 M 中。
-  2. 被动 GC 抢占：当需要进行 GC 时，为了保证不具备主动抢占处理的函数执行时间过长，导致
-     导致 GC 迟迟不得执行而导致的高延迟，而强制停止 G 并转为执行垃圾回收。
-     + enlistWorker
-     + gcStart: gcbgmarkworker
-     + gcStart: marktermination
+  2. 被动 GC 抢占：当需要进行垃圾回收时，为了保证不具备主动抢占处理的函数执行时间过长，导致
+     导致垃圾回收迟迟不得执行而导致的高延迟，而强制停止 G 并转为执行垃圾回收。
 
-## 协作式调度
+## 6.8.1 协作式调度
 
 ### 主动用户让权：Gosched
 
@@ -41,23 +37,23 @@ Gosched 是一种主动放弃执行的手段，用户态代码通过调用此接
 `Gosched` 的实现非常简单：
 
 ```go
-// Gosched 会让出当前的 P，并允许其他 goroutine 运行。
-// 它不会推迟当前的 goroutine，因此执行会被自动恢复
+// Gosched 会让出当前的 P，并允许其他 Goroutine 运行。
+// 它不会推迟当前的 Goroutine，因此执行会被自动恢复
 func Gosched() {
 	checkTimeouts()
 	mcall(gosched_m)
 }
 // Gosched 在 g0 上继续执行
 func gosched_m(gp *g) {
-	(...)
+	...
 	goschedImpl(gp)
 }
 ```
 
-它首先会通过 note 机制通知那些等待被 `ready` 的 goroutine：
+它首先会通过 note 机制通知那些等待被 `ready` 的 Goroutine：
 
 ```go
-// checkTimeouts 恢复那些在等待一个 note 且已经触发其 deadline 时的 goroutine。
+// checkTimeouts 恢复那些在等待一个 note 且已经触发其 deadline 时的 Goroutine。
 func checkTimeouts() {
 	now := nanotime()
 	for n, nt := range notesWithTimeout {
@@ -102,24 +98,20 @@ func ready(gp *g, traceskip int, next bool) {
 
 func notetsleepg(n *note, ns int64) bool {
 	gp := getg()
-	(...)
+	...
 
 	if ns >= 0 {
 		deadline := nanotime() + ns
-		(...)
-
-		(...)
+		...
 		notesWithTimeout[n] = noteWithTimeout{gp: gp, deadline: deadline}
-		(...)
-
+		...
 		gopark(nil, nil, waitReasonSleep, traceEvNone, 1)
-
-		(...)
+		...
 		delete(notesWithTimeout, n)
-		(...)
+		...
 	}
 
-	(...)
+	...
 }
 ```
 
@@ -131,7 +123,7 @@ func notetsleepg(n *note, ns int64) bool {
 func goschedImpl(gp *g) {
 	// 放弃当前 g 的运行状态
 	status := readgstatus(gp)
-	(...)
+	...
 	casgstatus(gp, _Grunning, _Grunnable)
 	// 使当前 m 放弃 g
 	dropg()
@@ -152,10 +144,10 @@ func goschedImpl(gp *g) {
 ### 主动调度弃权：栈扩张与抢占标记
 
 另一种主动放弃的方式是通过抢占标记的方式实现的。基本想法是在每个函数调用的序言
-（函数调用的最前方）插入抢占检测指令，当检测到当前 goroutine 被标记为被应该被抢占时，
+（函数调用的最前方）插入抢占检测指令，当检测到当前 Goroutine 被标记为被应该被抢占时，
 则主动中断执行，让出执行权利。表面上看起来想法很简单，但实施起来就比较复杂了。
 
-在 [6.6 goroutine 执行栈管理](./stack.md) 一节中我们已经了解到，函数调用的序言部分
+在 [6.6 执行栈管理](./stack.md) 一节中我们已经了解到，函数调用的序言部分
 会检查 SP 寄存器与 `stackguard0` 之间的大小，如果 SP 小于 `stackguard0` 则会
 触发 `morestack_noctxt`，触发栈分段操作。
 换言之，如果抢占标记将 `stackgard0` 设为比所有可能的 SP 都要大（即 `stackPreempt`），
@@ -164,7 +156,7 @@ func goschedImpl(gp *g) {
 ```go
 // Goroutine 抢占请求
 // 存储到 g.stackguard0 来导致栈分段检查失败
-// 必须必任何实际的 SP 都要大
+// 必须比任何实际的 SP 都要大
 // 十六进制为：0xfffffade
 const stackPreempt = (1<<(8*sys.PtrSize) - 1) & -1314
 ```
@@ -175,7 +167,7 @@ const stackPreempt = (1<<(8*sys.PtrSize) - 1) & -1314
 
 ```asm
 TEXT runtime·morestack(SB),NOSPLIT,$0-0
-	(...)
+	...
 	MOVQ	0(SP), AX // f's PC
 	MOVQ	AX, (g_sched+gobuf_pc)(SI)
 	MOVQ	SI, (g_sched+gobuf_g)(SI)
@@ -183,21 +175,20 @@ TEXT runtime·morestack(SB),NOSPLIT,$0-0
 	MOVQ	AX, (g_sched+gobuf_sp)(SI)
 	MOVQ	BP, (g_sched+gobuf_bp)(SI)
 	MOVQ	DX, (g_sched+gobuf_ctxt)(SI)
-	(...)
+	...
 	CALL	runtime·newstack(SB)
 ```
 
-是有记录 goroutine 的 PC 和 SP 寄存器，而后才开始调用 `newstack` 的：
+是有记录 Goroutine 的 PC 和 SP 寄存器，而后才开始调用 `newstack` 的：
 
 ```go
 //go:nowritebarrierrec
 func newstack() {
 	thisg := getg()
-	(...)
+	...
 
 	gp := thisg.m.curg
-
-	(...)
+	...
 
 	morebuf := thisg.m.morebuf
 	thisg.m.morebuf.pc = 0
@@ -217,10 +208,10 @@ func newstack() {
 			gogo(&gp.sched) // 重新进入调度循环
 		}
 	}
-	(...)
+	...
 	// 如果需要对栈进行调整
 	if preempt {
-		(...)
+		...
 		if gp.preemptShrink {
 			// 我们正在一个同步安全点，因此等待栈收缩
 			gp.preemptShrink = false
@@ -229,15 +220,15 @@ func newstack() {
 		if gp.preemptStop {
 			preemptPark(gp) // 永不返回
 		}
-		(...)
+		...
 		// 表现得像是调用了 runtime.Gosched，主动让权
 		gopreempt_m(gp) // 重新进入调度循环
 	}
-	(...)
+	...
 }
 // 与 gosched_m 一致
 func gopreempt_m(gp *g) {
-	(...)
+	...
 	goschedImpl(gp)
 }
 ```
@@ -264,21 +255,21 @@ func canPreemptM(mp *m) bool {
 确定不能抢占时返回并继续调度，如果真的需要进行抢占，则转入调用 `gopreempt_m`，
 放弃当前 G 的执行权，将其加入全局队列，重新进入调度循环。
 
-什么时候会会给 stackguard0 设置抢占标记 `stackPreempt` 呢？
+什么时候会会给 `stackguard0` 设置抢占标记 `stackPreempt` 呢？
 一共有以下几种情况：
 
 1. 进入系统调用时（`runtime.reentersyscall`，注意这种情况是为了保证不会发生栈分裂，
    真正的抢占是异步的通过系统监控进行的）
-3. 任何运行时不再持有锁的时候（`m.locks == 0`）
-4. GC 需要进入 STW 时（包括清扫终止以及标记终止两个需要 STW 的阶段）
+2. 任何运行时不再持有锁的时候（`m.locks == 0`）
+3. 当垃圾回收器需要停止所有用户 Goroutine 时
 
-## 抢占式调度
+## 6.8.2 抢占式调度
 
 从上面提到的两种协作式调度逻辑我们可以看出，这种需要用户代码来主动配合的调度方式存在
 一些致命的缺陷：一个没有主动放弃执行权、且不参与任何函数调用的函数，直到执行完毕之前，
 是不会被抢占的。那么这种不会被抢占的函数会导致什么严重的问题呢？回答是，由于运行时无法
 停止该用户代码，则当需要进行垃圾回收时，无法及时进行；对于一些实时性要求较高的用户态
-goroutine 而言，也久久得不到调度。我们这里不去深入讨论 GC 的具体细节，读者将垃圾回收器
+Goroutine 而言，也久久得不到调度。我们这里不去深入讨论垃圾回收的具体细节，读者将垃圾回收器
 一章中详细看到这类问题导致的后果。单从调度的角度而言，我们直接来看一个非常简单的例子：
 
 ```go
@@ -299,48 +290,49 @@ func main() {
 }
 ```
 
-这段代码中处于死循环的 goroutine 永远无法被抢占，其中创建的 goroutine
-会执行一个不产生任何调用、不主动放弃执行权的死循环。由于 main goroutine 优先调用了
-休眠，此时唯一的 P 会转去执行 for 循环所创建的 goroutine。进而 main goroutine
-永远不会再被调度，进而程序彻底阻塞在了这四个 goroutine 上，永远无法退出。这样的例子
+这段代码中处于死循环的 Goroutine 永远无法被抢占，其中创建的 Goroutine
+会执行一个不产生任何调用、不主动放弃执行权的死循环。由于主 Goroutine 优先调用了
+休眠，此时唯一的 P 会转去执行 for 循环所创建的 Goroutine。进而主 Goroutine
+永远不会再被调度，进而程序彻底阻塞在了这四个 Goroutine 上，永远无法退出。这样的例子
 非常多，但追根溯源，均为此问题导致。
 
-Go 官方其实很早（1.0 以前）就已经意识到了这个问题，但在 Go 1.2 时增加了上文提到的
-在函数序言部分增加抢占标记后，此问题便被搁置，直到越来越多的用户提交并报告此问题，
-在 Go 1.5 前后，Go 团队希望仅解决这种由密集循环导致的无法抢占的问题 [CELMENTS, 2015]，
+Go 团队其实很早（1.0 以前）就已经意识到了这个问题，但在 Go 1.2 时增加了上文提到的
+在函数序言部分增加抢占标记后，此问题便被搁置，直到越来越多的用户提交并报告此问题。
+在 Go 1.5 前后，Austin Clements 希望仅解决这种由密集循环导致的无法抢占的问题 [Clements, 2015]，
 于是尝试通过协作式 loop 循环抢占，通过编译器辅助的方式，插入抢占检查指令，
 与流程图回边（指节点被访问过但其子节点尚未访问完毕）**安全点**（在一个线程执行中，垃圾回收器
-能够识别所有对象引用状态的一个状态）的方式进行解决，尽管此举能为抢占带来显著的提升，但是在一个循环中
-引入分支显然会降低性能。尽管随后官方对这个方法进行了改进，仅在插入了一条
- TESTB 指令 [CHASE et al., 2017]，在完全没有分支以及寄存器压力的情况下，
-仍然造成了几何平均 7.8% 的性能损失。这种结果其实是情理之中的，很多需要进行密集循环的
-计算时间都是在运行时才能确定的，直接由编译器检测这类密集循环而插入额外的指令可想而知是
-欠妥的做法。
-终于在 Go 1.10 后 [CELMENTS, 2019]，官方进一步提出的解决方案，希望使用每个指令
-与执行栈和寄存器的映射，通过记录足够多的 metadata ，并通过异步线程来发送抢占信号的方式
-来支持异步抢占式调度。我们来仔细分析这一抢占的的原理。
+能够识别所有对象引用状态的一个状态，我们将在 [8.9 安全点分析](../ch08gc/safe.md) 
+一节中进一步深入讨论这一状态）的方式进行解决。
 
-### 用户态运行时抢占
+尽管此举能为抢占带来显著的提升，但是在一个循环中引入分支显然会降低性能。
+尽管随后 David Chase 对这个方法进行了改进，仅在插入了一条 TESTB 指令 [Chase, 2017]，
+在完全没有分支以及寄存器压力的情况下，仍然造成了几何平均 7.8% 的性能损失。
+这种结果其实是情理之中的，很多需要进行密集循环的计算时间都是在运行时才能确定的，
+直接由编译器检测这类密集循环而插入额外的指令可想而知是欠妥的做法。
 
-我们知道现代操作系统的调度器多为抢占式调度，其实现方式通过硬件终端来支持线程的切换，
+终于在 Go 1.10 后 [Clements, 2019]，Austin 进一步提出的解决方案，希望使用每个指令
+与执行栈和寄存器的映射关系，通过记录足够多的信息，并通过异步线程来发送抢占信号的方式
+来支持异步抢占式调度。
+
+我们知道现代操作系统的调度器多为抢占式调度，其实现方式通过硬件中断来支持线程的切换，
 进而能安全的保存运行上下文。在 Go 运行时实现抢占式调度同样也可以使用类似的方式，通过
 向线程发送系统信号的方式来中断 M 的执行，进而达到抢占的目的。
 但与操作系统的不同之处在于，由于运行时诸多机制的存在（例如垃圾回收器），还必须能够在
-goroutine 被停止时，保存充足的上下文信息（例如 GC 标记阶段的存活指针）。
+Goroutine 被停止时，保存充足的上下文信息。
 这就给中断信号带来了麻烦，如果中断信号恰好发生在一些关键阶段（例如写屏障期间），
 则无法保证程序的正确性。这也就要求我们需要严格考虑触发异步抢占的时机。
 
-异步抢占式调度的一种方式就与运行时系统监控有关，
-监控循环会将发生阻塞的 goroutine 抢占，解绑 P 与 M，从而让其他的线程能够获得 P 继续
-执行其他的 goroutine。这得益于 `sysmon` 中调用的 `retake` 方法。
-这个方法处理了两种抢占情况，一是抢占阻塞在系统调用上的 P，二是抢占运行时间过长的 G。
+异步抢占式调度的一种方式就与运行时系统监控有关，监控循环会将发生阻塞的 Goroutine 抢占，
+解绑 P 与 M，从而让其他的线程能够获得 P 继续执行其他的 Goroutine。
+这得益于 `sysmon` 中调用的 `retake` 方法。这个方法处理了两种抢占情况，
+一是抢占阻塞在系统调用上的 P，二是抢占运行时间过长的 G。
 其中抢占运行时间过长的 G 这一方式还会出现在垃圾回收需要进入 STW 时。
 
 ### P 抢占
 
 我们先来看抢占阻塞在系统调用上的 G 这种情况。这种抢占的实现方法非常的自然，因为
-goroutine 已经阻塞在了系统调用上，我们可以非常安全的将 M 与 P 进行解绑，即便是
-goroutine 从阻塞中恢复，也会检查自身所在的 M 是否仍然持有 P，如果没有 P 则重新考虑
+Goroutine 已经阻塞在了系统调用上，我们可以非常安全的将 M 与 P 进行解绑，即便是
+Goroutine 从阻塞中恢复，也会检查自身所在的 M 是否仍然持有 P，如果没有 P 则重新考虑
 与可用的 P 进行绑定。这种异步抢占的本质是：抢占 P。
 
 ```go
@@ -350,7 +342,7 @@ func retake(now int64) uint32 {
 	lock(&allpLock)
 	for i := 0; i < len(allp); i++ {
 		_p_ := allp[i]
-		(...)
+		...
 		pd := &_p_.sysmontick
 		s := _p_.status
 		sysretake := false
@@ -361,7 +353,7 @@ func retake(now int64) uint32 {
 				pd.schedtick = uint32(t)
 				pd.schedwhen = now
 			} else if pd.schedwhen+forcePreemptNS <= now {
-				(...)
+				...
 				sysretake = true
 			}
 		}
@@ -386,7 +378,7 @@ func retake(now int64) uint32 {
 			// 这个过程发生在 stoplockedm 中
 			incidlelocked(-1)
 			if atomic.Cas(&_p_.status, s, _Pidle) { // 将 P 设为 idle，从而交于其他 M 使用
-				(...)
+				...
 				n++
 				_p_.syscalltick++
 				handoffp(_p_)
@@ -411,19 +403,19 @@ func retake(now int64) uint32 {
 
 ### M 抢占
 
-在上面我们没有展现一个细节，那就是在检查 P 的状态时，P 如果是运行状态会调用 
+在 P 抢占的循环中，我们没有讨论一个细节：即在检查 P 的状态时，P 如果是运行状态会调用 
 `preemptone`，来通过系统信号来完成抢占，之所以没有在之前提及的原因在于该调用
 在 M 不与 P 绑定的情况下是不起任何作用直接返回的。这种异步抢占的本质是：抢占 M。
 我们不妨继续从系统监控产生的抢占谈起：
 
 ```go
 func retake(now int64) uint32 {
-	(...)
+	...
 	for i := 0; i < len(allp); i++ {
 		_p_ := allp[i]
-		(...)
+		...
 		if s == _Prunning || s == _Psyscall {
-			(...)
+			...
 			} else if pd.schedwhen+forcePreemptNS <= now {
 				// 对于 syscall 的情况，因为 M 没有与 P 绑定，
 				// preemptone() 不工作
@@ -431,9 +423,9 @@ func retake(now int64) uint32 {
 				sysretake = true
 			}
 		}
-		(...)
+		...
 	}
-	(...)
+	...
 }
 func preemptone(_p_ *p) bool {
 	// 检查 M 与 P 是否绑定
@@ -449,7 +441,7 @@ func preemptone(_p_ *p) bool {
 	// 将 G 标记为抢占
 	gp.preempt = true
 
-	// 一个 goroutine 中的每个调用都会通过比较当前栈指针和 gp.stackgard0
+	// 一个 Goroutine 中的每个调用都会通过比较当前栈指针和 gp.stackgard0
 	// 来检查栈是否溢出。
 	// 设置 gp.stackgard0 为 StackPreempt 来将抢占转换为正常的栈溢出检查。
 	gp.stackguard0 = stackPreempt
@@ -483,10 +475,10 @@ preemptM 完成了信号的发送，其实现也非常直接，直接向需要�
 const sigPreempt = _SIGURG
 
 // preemptM 向 mp 发送抢占请求。该请求可以异步处理，也可以与对 M 的其他请求合并。
-// 接收到该请求后，如果正在运行的 G 或 P 被标记为抢占，并且 goroutine 处于异步安全点，
-// 它将抢占 goroutine。在处理抢占请求后，它始终以原子方式递增 mp.preemptGen。
+// 接收到该请求后，如果正在运行的 G 或 P 被标记为抢占，并且 Goroutine 处于异步安全点，
+// 它将抢占 Goroutine。在处理抢占请求后，它始终以原子方式递增 mp.preemptGen。
 func preemptM(mp *m) {
-	(...)
+	...
 	signalM(mp, sigPreempt)
 }
 func signalM(mp *m, sig int) {
@@ -501,23 +493,25 @@ func signalM(mp *m, sig int) {
 将针对信号的类型进行处理，当信号处理函数执行结束后，程序会再次进入内核空间，进而恢复到
 被中断的位置。
 
-但是这里面又一个很巧妙的用法，因为 sighandler 能够获得操作系统所提供的执行上下文参数
-（例如寄存器 `rip`, `rep` 等），如果在 sighandler 中修改了这个上下文参数，OS 会
-根据就该的寄存器进行恢复，这也就为抢占提供了机会。
+但是这里面又一个很巧妙的用法，在 [6.5 信号处理机制](./signal.md) 一节中我们已经介绍了
+Go 运行时进行信号处理的基本做法，其核心是注册 `sighandler` 函数，并在信号到达后，
+由操作系统中断转入内核空间，而后将所中断线程的执行上下文参数（例如寄存器 `rip`, `rep` 等）
+传递给处理函数。如果在 `sighandler` 中修改了这个上下文参数，操作系统则会根据修改后的
+上下文信息恢复执行，这也就为抢占提供了机会。
 
 ```go
 //go:nowritebarrierrec
 func sighandler(sig uint32, info *siginfo, ctxt unsafe.Pointer, gp *g) {
-	(...)
+	...
 	c := &sigctxt{info, ctxt}
-	(...)
+	...
 	if sig == sigPreempt {
 		// 可能是一个抢占信号
 		doSigPreempt(gp, c)
 		// 即便这是一个抢占信号，它也可能与其他信号进行混合，因此我们
 		// 继续进行处理。
 	}
-	(...)
+	...
 }
 // doSigPreempt 处理了 gp 上的抢占信号
 func doSigPreempt(gp *g, ctxt *sigctxt) {
@@ -531,8 +525,8 @@ func doSigPreempt(gp *g, ctxt *sigctxt) {
 	atomic.Xadd(&gp.m.preemptGen, 1)
 ```
 
-在 `ctxt.pushCall` 之前， `ctxt.rip()` 和 `ctxt.rep()` 都保存了被中断的 goroutine 所在的位置，
-但是 `pushCall` 直接修改了这些寄存器，进而当从 sighandler 返回用户态 goroutine 时，
+在 `ctxt.pushCall` 之前， `ctxt.rip()` 和 `ctxt.rep()` 都保存了被中断的 Goroutine 所在的位置，
+但是 `pushCall` 直接修改了这些寄存器，进而当从 sighandler 返回用户态 Goroutine 时，
 能够从注入的 `asyncPreempt` 开始执行：
 
 ```go
@@ -560,15 +554,15 @@ func asyncPreempt()
 
 ```asm
 TEXT ·asyncPreempt(SB),NOSPLIT|NOFRAME,$0-0
-	(...)
+	...
 	MOVQ AX, 0(SP)
-	(...)
+	...
 	MOVUPS X15, 352(SP)
 	CALL ·asyncPreempt2(SB)
 	MOVUPS 352(SP), X15
-	(...)
+	...
 	MOVQ 0(SP), AX
-	(...)
+	...
 	RET
 ```
 
@@ -590,122 +584,30 @@ func asyncPreempt2() {
 }
 ```
 
-至此，异步抢占过程结束。
+至此，异步抢占过程结束。我们总结一下抢占调用的整体逻辑：
 
-我们总结一下抢占调用的整体逻辑：
+1. M1 发送中断信号（`signalM(mp, sigPreempt)`）
+2. M2 收到信号，操作系统中断其执行代码，并切换到信号处理函数（`sighandler(signum, info, ctxt, gp)`）
+3. M2 修改执行的上下文，并恢复到修改后的位置（`asyncPreempt`）
+4. 重新进入调度循环进而调度其他 Goroutine（`preemptPark` 和 `gopreempt_m`）
 
-1. M1 发送中断信号 `signalM(mp, sigPreempt)`
-2. M2 收到信号，操作系统中断其执行代码，并切换到信号处理函数 `sighandler(signum, info, ctxt, gp)`
-3. M2 修改执行的上下文，并恢复到修改后的位置 `asyncPreempt`
-4. 重新进入调度循环进而调度其他 goroutine `preemptPark` `gopreempt_m`
-
-#### 抢占的安全区
-
-什么时候才能进行抢占呢？如何才能区分该抢占信号是运行时发出的还是用户代码发出的呢？
-TODO:
-
-
-TODO: 解释执行栈映射补充寄存器映射，中断信号 SIGURG
-
-```go
-// wantAsyncPreempt 返回异步抢占是否被 gp 请求
-func wantAsyncPreempt(gp *g) bool {
-	// 同时检查 G 和 P
-	return (gp.preempt || gp.m.p != 0 && gp.m.p.ptr().preempt) && readgstatus(gp)&^_Gscan == _Grunning
-}
-```
-
-什么时候才是安全的异步抢占点呢？
-TODO:
-
-```go
-func isAsyncSafePoint(gp *g, pc, sp, lr uintptr) bool {
-	mp := gp.m
-
-	// Only user Gs can have safe-points. We check this first
-	// because it's extremely common that we'll catch mp in the
-	// scheduler processing this G preemption.
-	if mp.curg != gp {
-		return false
-	}
-
-	// Check M state.
-	if mp.p == 0 || !canPreemptM(mp) {
-		return false
-	}
-
-	// Check stack space.
-	if sp < gp.stack.lo || sp-gp.stack.lo < asyncPreemptStack {
-		return false
-	}
-
-	// Check if PC is an unsafe-point.
-	f := findfunc(pc)
-	if !f.valid() {
-		// Not Go code.
-		return false
-	}
-	(...)
-	smi := pcdatavalue(f, _PCDATA_RegMapIndex, pc, nil)
-	if smi == -2 {
-		// Unsafe-point marked by compiler. This includes
-		// atomic sequences (e.g., write barrier) and nosplit
-		// functions (except at calls).
-		return false
-	}
-	if fd := funcdata(f, _FUNCDATA_LocalsPointerMaps); fd == nil || fd == unsafe.Pointer(&no_pointers_stackmap) {
-		// This is assembly code. Don't assume it's
-		// well-formed. We identify assembly code by
-		// checking that it has either no stack map, or
-		// no_pointers_stackmap, which is the stack map
-		// for ones marked as NO_LOCAL_POINTERS.
-		//
-		// TODO: Are there cases that are safe but don't have a
-		// locals pointer map, like empty frame functions?
-		return false
-	}
-	if hasPrefix(funcname(f), "runtime.") ||
-		hasPrefix(funcname(f), "runtime/internal/") ||
-		hasPrefix(funcname(f), "reflect.") {
-		// For now we never async preempt the runtime or
-		// anything closely tied to the runtime. Known issues
-		// include: various points in the scheduler ("don't
-		// preempt between here and here"), much of the defer
-		// implementation (untyped info on stack), bulk write
-		// barriers (write barrier check),
-		// reflect.{makeFuncStub,methodValueCall}.
-		//
-		// TODO(austin): We should improve this, or opt things
-		// in incrementally.
-		return false
-	}
-
-	return true
-}
-```
-
-#### 其他抢占触发点
-
-TODO: 一些 GC 的处理， suspendG
-
-preemptStop 会在什么时候被设置为抢占呢？GC。
-
+上述的异步抢占流程我们是通过系统监控来说明的，正如前面所提及的，异步抢占的本质是在为垃圾回收器服务，
+由于我们还没有讨论过 Go 语言垃圾回收的具体细节，这里便不做过多展开，读者只需理解，在垃圾回收周期开始时，
+垃圾回收器将通过上述异步抢占的逻辑，停止所有用户 Goroutine，进而转去执行垃圾回收。
 
 ## 小结
 
-异步抢占的引入，解决的核心问题是任意时间的 GC 延迟，Go 语言的用户可以放心的写出密集
-循环，垃圾回收也能够在适当的时候及时中断用户代码，不至于导致整个系统进入不可预测的停顿。
-总的来说，Go 从设计之初就没有刻意的去考虑对 goroutine 的抢占机制，到意识到这一协作式
-抢占机制对用户造成的影响，再到如今支持异步抢占，造就了目前运行时提供的多种多样
-的协作与抢占调度机制。
+总的来说，应用层的调度策略不易实现，因此实现上也并不是特别紧急。我们回顾 Go 语言调度策略的演变过程
+不难发现，实现它们的动力是从实际需求出发的。Go 语言从设计之初并没有刻意的去考虑对 Goroutine 的抢占机制。
+从早期无法对 Goroutine 进行抢占的原始时代，到现在的协作与抢占同时配合的调度策略，
+其问题的核心是垃圾回收等运行时机制的需要。
 
-## 进一步阅读的参考文献
-
-- [CELMENTS, 2019] [Proposal: Non-cooperative goroutine preemption](https://github.com/golang/proposal/blob/master/design/24543-non-cooperative-preemption.md)
-- [CELMENTS, 2015] [runtime: tight loops should be preemptible](https://github.com/golang/go/issues/10958)
-- [CHASE et al., 2017] [cmd/compile: loop preemption with "fault branch" on amd64](https://go-review.googlesource.com/c/go/+/43050/)
+当运行时需要执行垃圾回收时，协作式调度能够保证具备函数调用的用户 Goroutine 正常停止；
+抢占式调度则能避免由于死循环导致的任意时间的垃圾回收延迟。有了这两种不同的调度策略，
+Go 语言的用户可以放心的写出各种形式的代码逻辑，即使运行时垃圾回收也能够在适当的时候及时中断用户代码，
+不至于导致整个系统进入不可预测的停顿。
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).
 

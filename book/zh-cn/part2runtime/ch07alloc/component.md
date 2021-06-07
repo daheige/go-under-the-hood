@@ -5,8 +5,6 @@ title: "7.2 组件"
 
 # 7.2 组件
 
-[TOC]
-
 本节独立地讨论内存分配器中的几个组件：`fixalloc`、`linearAlloc`、`mcache`。
 
 ## fixalloc
@@ -497,4 +495,4 @@ func sysFree(v unsafe.Pointer, n uintptr, sysStat *uint64) {
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

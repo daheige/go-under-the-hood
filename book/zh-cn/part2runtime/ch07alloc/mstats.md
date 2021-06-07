@@ -1,12 +1,10 @@
 ---
-weight: 2207
-title: "7.7 内存统计"
+weight: 2208
+title: "7.8 内存统计"
 ---
 
 
-# 7.7 内存统计
-
-[TOC]
+# 7.8 内存统计
 
 Go 运行时对用户提供只读的内存统计信息，通过 `runtime.MemStats` 支持。
 公共方法只有一个：`ReadMemStats`。但调用这个方法的代价非常之大：
@@ -184,4 +182,4 @@ func purgecachedstats(c *mcache) {
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

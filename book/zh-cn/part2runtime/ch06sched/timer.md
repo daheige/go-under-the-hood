@@ -5,14 +5,22 @@ title: "6.11 计时器"
 
 # 6.11 计时器
 
-[TOC]
-
-> 本节内容提供一个线上演讲：[YouTube 在线](https://www.youtube.com/watch?v=XJx0eTP-y9I)，[Google Slides 讲稿](https://docs.google.com/presentation/d/1c2mRWA-FiihgpbGsE4uducou7X5d4WoiiLVab-ewsT8/edit?usp=sharing)。
+> 本节内容提供一个线上演讲：[YouTube 在线](https://www.youtube.com/watch?v=XJx0eTP-y9I)，[Google Slides 讲稿](https://changkun.de/s/timer114/)。
 
 time 是一个很有意思的包，除去需要获取当前时间的 Now 这一平淡无奇、直接对系统调用进行
 封装（ `runtime·nanotime` ）的函数外，其中最有意思的莫过于它所提供的 Timer 和 Ticker 了。
 他们的实现，驱动了诸如 `time.After`, `time.AfterFunc`, `time.Tick`, `time.Sleep` 等方法。
 本节我们便来仔细了解一下 Timer 的实现机制。
+
+TODO: Timer 最近增加了几次更新，修复了一些性能问题，本文需要更新：
+- https://go-review.googlesource.com/c/go/+/214299/
+- https://go-review.googlesource.com/c/go/+/214185/
+- https://go-review.googlesource.com/c/go/+/215722
+- https://go-review.googlesource.com/c/go/+/221077
+
+如果用户代码启动和停止很多计时器（例如 context.WithTimeout）则将稳定使用内存中残留的已经停止的计时器，而不是已经从计时器堆中删除的计时器。，第一个 CL 解决了这个问题，会在计时器总数超过 1/4 堆计时器时候，删除所有已经删除的计时器。
+第二个 CL 尝试解决这个问题：空闲的 P 在偷取计时器时会与正在运行的 P 发生锁的竞争。方法是仅在下一个计时器准备运行或有一些计时器需要运行时才获得计时器锁定。
+但是这个方案有带来了新的问题：导致越来越多的已经删除的计时器积累，从而没有就绪任何计时器。一个解决方案是在没有获取锁的情况下检查否有很多已经删除的计时器。
 
 Timer 和 Ticker 所有的功能核心自然由运行时机制来驱动。当创建一个 Timer 时候：
 
@@ -86,7 +94,7 @@ type runtimeTimer struct {
 	pp uintptr // timer 所在的 P 的指针
 
 	// 当时间为 when 时，唤醒 timer，当时间为 when+period, ... (period > 0)
-	// 时，均在 timer goroutine 中调用 f(arg, now)，从而 f 必须具有良好的行为（不会阻塞）
+	// 时，均在 timer Goroutine 中调用 f(arg, now)，从而 f 必须具有良好的行为（不会阻塞）
 	when     int64
 	period   int64
 	f        func(interface{}, uintptr)
@@ -100,8 +108,8 @@ func stopTimer(*runtimeTimer) bool
 func resetTimer(*runtimeTimer, int64)
 ```
 
-可见，timer 返回的 channel 会被用户代码的 goroutine 持有，为了使 channel 能正常
-进行消息通信，每当 timer 被唤醒时，timer 自建的 goroutine 会单独向 channel 发送
+可见，timer 返回的 channel 会被用户代码的 Goroutine 持有，为了使 channel 能正常
+进行消息通信，每当 timer 被唤醒时，timer 自建的 Goroutine 会单独向 channel 发送
 当前时间 `Now()`：
 
 ```go
@@ -113,7 +121,7 @@ func sendTime(c interface{}, seq uintptr) {
 }
 ```
 
-## Timer 状态机
+## 6.11.1 Timer 状态机
 
 早在 Go 1.10 以前，所有的 timer 均在一个全局的四叉小顶堆中进行维护，显然并发性能是
 不够的，随后到了 Go 1.10 时，将堆的数量扩充到了 64 个，但仍然需要在唤醒 timer 时，
@@ -181,9 +189,12 @@ timer 作为一个对时间敏感的功能，同网络数据的拉取操作一�
 在这个过程中要小心当 P 被回收时，需要将局部的 P 进行删除，或者转移到其他 P 上，
 由 `runtime.moveTimers` 实现。
 
-一个 Timer 具有十种状态，他们之间的状态转换图如下所示：
+一个 Timer 具有十种状态，他们之间的状态转换图如图 1 所示。
 
-![](../../../assets/timers.png)
+<div class="img-center" style="margin: 0 auto; max-width: 70%">
+<img src="../../../assets/timers.png"/>
+<strong>图 1: 计时器状态机</strong>
+</div>
 
 总结来说：
 
@@ -535,7 +546,7 @@ func runOneTimer(pp *p, t *timer, now int64) {
 
 	unlock(&pp.timersLock)
 
-	f(arg, seq) // 触发 sendTime 信号 通知用户 goroutine
+	f(arg, seq) // 触发 sendTime 信号 通知用户 Goroutine
 
 	lock(&pp.timersLock)
 
@@ -543,7 +554,7 @@ func runOneTimer(pp *p, t *timer, now int64) {
 }
 ```
 
-## Timer 的触发
+## 6.11.2 Timer 的触发
 
 ### 从调度循环中直接触发
 
@@ -666,7 +677,7 @@ func addAdjustedTimers(pp *p, moved []*timer) {
 }
 ```
 
-与调度器调度 goroutine 的机制相同，如果一个 P 中没有了 timer，同样会尝试从其他
+与调度器调度 Goroutine 的机制相同，如果一个 P 中没有了 timer，同样会尝试从其他
 的 P 中偷取一半的 timer：
 
 ```go
@@ -735,7 +746,7 @@ top:
 		}
 	}
 	if ranTimer {
-		// 执行完一个 timer 后可能存在已经就绪的 goroutine
+		// 执行完一个 timer 后可能存在已经就绪的 Goroutine
 		goto top
 	}
 
@@ -891,7 +902,7 @@ func wakeNetPoller(when int64) {
 
 ### 从系统监控中触发
 
-与 goroutine 调度完全一样，系统监控也负责 netpoller 的触发，并在必要时启动 M 来执行需要的 timer 或获取网络数据。
+与 Goroutine 调度完全一样，系统监控也负责 netpoller 的触发，并在必要时启动 M 来执行需要的 timer 或获取网络数据。
 
 ```go
 //go:nowritebarrierrec
@@ -925,7 +936,7 @@ func sysmon() {
 		lastpoll := int64(atomic.Load64(&sched.lastpoll))
 		if netpollinited() && lastpoll != 0 && lastpoll+10*1000*1000 < now {
 			atomic.Cas64(&sched.lastpoll, uint64(lastpoll), uint64(now))
-			list := netpoll(0) // 非阻塞，返回 goroutine 列表
+			list := netpoll(0) // 非阻塞，返回 Goroutine 列表
 			if !list.empty() {
 				// 需要在插入 g 列表前减少空闲锁住的 m 的数量（假装有一个正在运行）
 				// 否则会导致这些情况：
@@ -1035,15 +1046,9 @@ func timejump() *p {
 ## 小结
 
 Timer 的实现已经经历了好几次大幅度的优化。如今的 Timer 生存在 P 中，每当进入调度循环时，
-都会对 Timer 进行检查，从而快速的启动那些对时间敏感的 goroutine，
+都会对 Timer 进行检查，从而快速的启动那些对时间敏感的 Goroutine，
 这一思路也同样得益于 netpoller，通过系统事件来唤醒那些对有效性极度敏感的任务。
-
-## 进一步阅读的参考文献
-
-- [runtime: timer doesn't scale on multi-CPU systems with a lot of timers](https://github.com/golang/go/issues/15133)
-- [time: excessive CPU usage when using Ticker and Sleep](https://github.com/golang/go/issues/27707)
-- [runtime: make timers faster](https://github.com/golang/go/issues/6239)
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

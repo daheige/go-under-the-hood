@@ -1,11 +1,9 @@
 ---
-weight: 2306
-title: "8.6 扫描标记与标记辅助"
+weight: 2304
+title: "8.4 扫描标记与标记辅助"
 ---
 
-# 8.6 扫描标记与标记辅助
-
-[TOC]
+# 8.4 扫描标记与标记辅助
 
 ```go
 func gcBgMarkWorker(_p_ *p) {
@@ -77,13 +75,13 @@ func gcBgMarkWorker(_p_ *p) {
 		// scheduler wants to preempt us, we'll stop draining,
 		// dispose the gcw, and then preempt.
 		park.m.set(acquirem())
-		(...)
+		...
 
 		startTime := nanotime()
 		_p_.gcMarkWorkerStartTime = startTime
 
 		decnwait := atomic.Xadd(&work.nwait, -1)
-		(...)
+		...
 
 		systemstack(func() {
 			// Mark our goroutine preemptible so its stack
@@ -95,7 +93,7 @@ func gcBgMarkWorker(_p_ *p) {
 			// read from the G stack.
 			casgstatus(gp, _Grunning, _Gwaiting)
 			switch _p_.gcMarkWorkerMode {
-			(...)
+			...
 			case gcMarkWorkerDedicatedMode:
 				gcDrain(&_p_.gcw, gcDrainUntilPreempt|gcDrainFlushBgCredit)
 				if gp.preempt {
@@ -142,7 +140,7 @@ func gcBgMarkWorker(_p_ *p) {
 		// of work?
 		incnwait := atomic.Xadd(&work.nwait, +1)
 		if incnwait > work.nproc {
-			(...)
+			...
 		}
 
 		// If this worker reached a background mark completion
@@ -173,4 +171,4 @@ func gcBgMarkWorker(_p_ *p) {
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

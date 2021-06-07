@@ -3,15 +3,24 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·asyncPreempt(SB),NOSPLIT|NOFRAME,$0-0
+// Note: asyncPreempt doesn't use the internal ABI, but we must be able to inject calls to it from the signal handler, so Go code has to see the PC of this function literally.
+TEXT ·asyncPreempt<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-0
 	PUSHQ BP
 	MOVQ SP, BP
+	// Save flags before clobbering them
 	// 在 clobbering 破坏 flag 之前保存他们
 	PUSHFQ
+	// obj doesn't understand ADD/SUB on SP, but does understand ADJSP
 	// obj 不理解 SP 上的 ADD/SUB，但理解 ADJSP
 	ADJSP $368
+	// But vet doesn't know ADJSP, so suppress vet stack checking
 	// 不过 vec 不知道 ADJSP，因此阻止 vet 栈检查
 	NOP SP
+	#ifdef GOOS_darwin
+	CMPB internal∕cpu·X86+const_offsetX86HasAVX(SB), $0
+	JE 2(PC)
+	VZEROUPPER
+	#endif
 	MOVQ AX, 0(SP)
 	MOVQ CX, 8(SP)
 	MOVQ DX, 16(SP)

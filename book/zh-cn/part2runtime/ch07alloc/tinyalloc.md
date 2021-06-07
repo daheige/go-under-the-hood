@@ -5,10 +5,6 @@ title: "7.6 微对象分配"
 
 # 7.6 微对象分配
 
-[TOC]
-
-
-
 微对象（tiny object）是指那些小于 16 byte 的对象分配，
 微对象分配会将多个对象存放到一起，与小对象分配相比，过程基本类似。
 
@@ -59,4 +55,4 @@ size = maxTinySize
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

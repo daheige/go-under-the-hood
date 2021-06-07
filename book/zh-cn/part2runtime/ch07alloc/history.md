@@ -1,15 +1,12 @@
 ---
-weight: 2208
-title: "7.8 过去、现在与未来"
+weight: 2209
+title: "7.9 过去、现在与未来"
+bookHidden: true
 ---
 
-# 7.8 过去、现在与未来
-
-[TOC]
-
-
+# 7.9 过去、现在与未来
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).
 

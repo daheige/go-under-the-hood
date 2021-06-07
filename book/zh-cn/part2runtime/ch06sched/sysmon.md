@@ -5,16 +5,14 @@ title: "6.9 系统监控"
 
 # 6.9 系统监控
 
-[TOC]
-
 我们已经完整分析过调度器的调度执行了。
-当我们通过 `runtime.newproc` 创建好主 goroutine 后，会将其加入到一个 P 的本地队列中。
-随着 `runtime.mstart` 启动调度器，主 goroutine 便开始得以调度。
+当我们通过 `runtime.newproc` 创建好主 Goroutine 后，会将其加入到一个 P 的本地队列中。
+随着 `runtime.mstart` 启动调度器，主 Goroutine 便开始得以调度。
 
 ```go
 // src/runtime/proc.go
 
-// 主 goroutine
+// 主 Goroutine
 func main() {
 	(...)
 	// 启动系统后台监控（定期垃圾回收、并发任务调度）
@@ -25,9 +23,9 @@ func main() {
 }
 ```
 
-那么是时候看看主 goroutine 中的系统监控 `newm(sysmon, nil)` 到底在干什么了。
+那么是时候看看主 Goroutine 中的系统监控 `newm(sysmon, nil)` 到底在干什么了。
 
-## 监控循环
+## 6.9.1 监控循环
 
 ```go
 // 系统监控在一个独立的 m 上运行
@@ -96,7 +94,7 @@ func sysmon() {
 		lastpoll := int64(atomic.Load64(&sched.lastpoll))
 		if netpollinited() && lastpoll != 0 && lastpoll+10*1000*1000 < now {
 			atomic.Cas64(&sched.lastpoll, uint64(lastpoll), uint64(now))
-			list := netpoll(0) // 非阻塞，返回 goroutine 列表
+			list := netpoll(0) // 非阻塞，返回 Goroutine 列表
 			if !list.empty() {
 				// 需要在插入 g 列表前减少空闲锁住的 m 的数量（假装有一个正在运行）
 				// 否则会导致这些情况：
@@ -154,17 +152,17 @@ func sysmon() {
 4. 检查是不是该触发 GC 了
 5. 如果距离上一次堆清理已经超过了两分半，则执行清理工作
 
-其中的 `note` 同步机制 `retake` 抢占已在[6.7 协作与抢占](./preemption.md) 和 [6.8 运行时同步原语](./sync.md) 中详细讨论过了。
+其中的 `note` 同步机制 `retake` 抢占已在[6.8 协作与抢占](./preemption.md) 和 [6.8 同步原语](./sync.md) 中详细讨论过了。
 
-## 小结
+## 6.9.2 小结
 
 总的来说系统监控的本职工作还是比较明确的，它在一个单独的 M 上执行，负责处理网络数据、抢占 P/G、触发 GC、清理堆 span。
 对于这些职责，我们需要确定一些细节工作：
 
-2. `gcTrigger` 如何触发 GC？在 [垃圾回收器：初始化](../ch08GC/init.md) 一节中详细讨论。
+2. `gcTrigger` 如何触发 GC？在 [垃圾回收器：初始化](../ch08gc/init.md) 一节中详细讨论。
 3. `scavenge` 如何清理堆 span？
 4. `netpoll` 如何 poll 网络数据？
 
 ## 许可
 
-[Go under the hood](https://github.com/changkun/go-under-the-hood) | CC-BY-NC-ND 4.0 & MIT &copy; [changkun](https://changkun.de)
+&copy; 2018-2020 The [golang.design](https://golang.design) Initiative Authors. Licensed under [CC-BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).

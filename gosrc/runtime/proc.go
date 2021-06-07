@@ -555,7 +555,7 @@ func schedinit() {
 
 	// cpu 相关的初始化
 	cpuinit() // 必须在 alginit 之前运行
-	alginit() // maps 不能在此调用之前使用，从 CPU 指令集初始化哈希算法
+	alginit() // maps 不能在此调用之前使用，从 CPU 指令集初始化散列算法
 
 	// 模块加载相关的初始化
 	modulesinit()   // 模块链接，提供 activeModules
@@ -879,7 +879,7 @@ func casGFromPreempted(gp *g, old, new uint32) bool {
 
 // stopTheWorld 从正在执行的 goroutine 中停止所有的 P，在 GC 安全点 safe point
 // 打断所有 goroutine 并记录打断的原因。作为结果，只有当前 goroutine 的 P 正在运行。
-// stopTheWorld 不能再系统栈上调用，调用方也不能持有 worldsema。调用放必须在其他 P
+// stopTheWorld 不能在系统栈上调用，调用方也不能持有 worldsema。调用方必须在其他 P
 // 应该恢复执行的时候调用 startTheWorld。
 //
 // stopTheWorld 在多个 goroutine 间同时调用时安全的。每个 goroutine 都会执行自己
@@ -890,23 +890,8 @@ func casGFromPreempted(gp *g, old, new uint32) bool {
 func stopTheWorld(reason string) {
 	// 抢占 worldsema
 	semacquire(&worldsema)
-	gp := getg()
-	gp.m.preemptoff = reason
-	systemstack(func() {
-		// Mark the goroutine which called stopTheWorld preemptible so its
-		// stack may be scanned.
-		// This lets a mark worker scan us while we try to stop the world
-		// since otherwise we could get in a mutual preemption deadlock.
-		// We must not modify anything on the G stack because a stack shrink
-		// may occur. A stack shrink is otherwise OK though because in order
-		// to return from this function (and to leave the system stack) we
-		// must have preempted all goroutines, including any attempting
-		// to scan our stack, in which case, any stack shrinking will
-		// have already completed by the time we exit.
-		casgstatus(gp, _Grunning, _Gwaiting)
-		stopTheWorldWithSema()
-		casgstatus(gp, _Gwaiting, _Grunning)
-	})
+	getg().m.preemptoff = reason
+	systemstack(stopTheWorldWithSema)
 }
 
 // startTheWorld undoes the effects of stopTheWorld.
@@ -918,29 +903,9 @@ func startTheWorld() {
 	getg().m.preemptoff = ""
 }
 
-// until the GC is not running. It also blocks a GC from starting
-// until startTheWorldGC is called.
-func stopTheWorldGC(reason string) {
-	semacquire(&gcsema)
-	stopTheWorld(reason)
-}
-
-// startTheWorldGC undoes the effects of stopTheWorldGC.
-func startTheWorldGC() {
-	startTheWorld()
-	semrelease(&gcsema)
-}
-
 // 持有 worldsema 会授权 M stop the world 的权利。
+// 并保护并发的被修改 gomaxprocs
 var worldsema uint32 = 1
-
-// Holding gcsema grants the M the right to block a GC, and blocks
-// until the current GC is done. In particular, it prevents gomaxprocs
-// from changing concurrently.
-//
-// TODO(mknyszek): Once gomaxprocs and the execution tracer can handle
-// being changed/enabled during a GC, remove this.
-var gcsema uint32 = 1
 
 // stopTheWorldWithSema 是 stopTheWorld 的核心实现。调用方负责抢占 worldsema
 // 并经用其可抢占的属性，然后再系统栈上调用 stopTheWorldWithSema：
@@ -1205,7 +1170,7 @@ func mexit(osStack bool) {
 		// 主线程
 		//
 		// 在 linux 中，退出主线程会导致进程变为僵尸进程。
-		// 在 plan 9 中，退出主线程将取消阻塞等待，及时其他线程仍在运行。
+		// 在 plan 9 中，退出主线程将取消阻塞等待，即使其他线程仍在运行。
 		// 在 Solaris 中我们既不能 exitThread 也不能返回到 mstart 中。
 		// 其他系统上可能发生别的糟糕的事情。
 		//
@@ -2715,7 +2680,13 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 			now = nanotime()
 		}
 		if now < next {
-			return now, next, false
+			// Next timer is not ready to run.
+			// But keep going if we would clear deleted timers.
+			// This corresponds to the condition below where
+			// we decide whether to call clearDeletedTimers.
+			if pp != getg().m.p.ptr() || int(atomic.Load(&pp.deletedTimers)) <= int(atomic.Load(&pp.numTimers)/4) {
+				return now, next, false
+			}
 		}
 	}
 
@@ -3737,8 +3708,8 @@ retry:
 	_p_.gFree.n--
 	// 查看是否需要分配运行栈
 	if gp.stack.lo == 0 {
-		// 栈可能从全局 gfree 链表中取得，栈已被 gfput 给释放，所以需要分配一个新的栈。
-		// 栈分配发生在系统栈上
+		// 在 gfput 函数中，可能将非固定大小（例如发生伸缩后）的运行栈进行释放，
+		// 此时的 g 不具备运行栈，因此需要重新分配一个新的栈。
 		systemstack(func() {
 			gp.stack = stackalloc(_FixedStack)
 		})
@@ -4235,6 +4206,7 @@ func (pp *p) destroy() {
 		lock(&pp.timersLock)
 		moveTimers(plocal, pp.timers)
 		pp.timers = nil
+		pp.numTimers = 0
 		pp.adjustTimers = 0
 		pp.deletedTimers = 0
 		atomic.Store64(&pp.timer0When, 0)
@@ -4277,7 +4249,7 @@ func (pp *p) destroy() {
 	// 释放当前 P 绑定的 cache
 	freemcache(pp.mcache)
 	pp.mcache = nil
-	// 将当前 P 的 G 复链转移到全局
+	// 将当前 P 的空闲的 G 复链转移到全局
 	gfpurge(pp)
 	traceProcFree(pp)
 	if raceenabled {
@@ -5308,7 +5280,7 @@ func runqgrab(_p_ *p, batch *[256]guintptr, batchHead uint32, stealRunNextG bool
 	}
 }
 
-// 从 p2 runnable 队列中偷取一般的元素并将其放入 p 的 runnable 队列中
+// 从 p2 runnable 队列中偷取一半的元素并将其放入 p 的 runnable 队列中
 // 返回其中一个偷取的元素（如果失败则返回 nil）
 func runqsteal(_p_, p2 *p, stealRunNextG bool) *g {
 	t := _p_.runqtail
